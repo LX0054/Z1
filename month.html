@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>月览页面</title>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.2/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    .green { color: green; }
+    .red { color: red; }
+    select { font-size: 16px; margin: 10px 5px; }
+    .compare-block { margin-top: 20px; }
+    .day-line { margin-bottom: 10px; }
+    .day-detail { display: none; padding-left: 20px; }
+  </style>
+</head>
+<body>
+  <label>选择年份：</label>
+  <select id="yearSelect"></select>
+  <label>选择月份：</label>
+  <select id="monthSelect"></select>
+
+  <div id="monthSummary"></div>
+  <canvas id="barChart" height="100"></canvas>
+  <div id="dailyDetails"></div>
+
+  <script>
+    let allData = [];
+
+    function parseEuro(value) {
+      return parseFloat((value || '').replace('€','').replace(',','').trim()) || 0;
+    }
+
+    function formatWanYuan(amount) {
+      const v = Math.round(amount);
+      const wan = Math.floor(v / 10000);
+      const qian = v % 10000;
+      return (wan > 0 ? wan + "万" : "") + qian + "欧元";
+    }
+
+    function getYM(dateStr) {
+      const m = dateStr.match(/(\d{4})[\/\-年](\d{1,2})/);
+      return m ? [m[1], m[2].padStart(2, '0')] : null;
+    }
+
+    function calcIncome(row, includeTakeout = true) {
+      const year = row['日期'].slice(0, 4);
+      const cash = parseEuro(row['现金']) - parseEuro(row['外卖现金']);
+      const card = parseEuro(row['BBVA']) + parseEuro(row['CAJA7']);
+      let takeout = (parseEuro(row['GLOVO']) + parseEuro(row['UBER'])) * 0.7;
+      if ((year === '2022' || year === '2023') && !includeTakeout) takeout = 0;
+      return { cash, card, takeout, total: cash + card + takeout };
+    }
+
+    function renderMonthView(y, m) {
+      const rows = allData.filter(r => {
+        const [ry, rm] = getYM(r['日期']) || [];
+        return ry === y && rm === m;
+      });
+
+      let cash = 0, card = 0, takeout = 0, invoice = 0;
+      const dailyData = [];
+
+      rows.forEach(r => {
+        const income = calcIncome(r, true);
+        const iso = r['日期'].replace(/[年月]/g, '-').replace('日','');
+        const today = new Date().toISOString().slice(0, 10);
+        dailyData.push({ row: r, cash: income.cash, card: income.card, takeout: income.takeout, total: income.total, iso, today });
+        cash += income.cash;
+        card += income.card;
+        takeout += income.takeout;
+        invoice += parseEuro(r['买货发票']);
+      });
+
+      const total = cash + card + takeout;
+      const percent = total > 0 ? Math.round(invoice / total * 100) : 0;
+
+      const summaryDiv = document.getElementById("monthSummary");
+      summaryDiv.innerHTML = `
+        <h3 style="font-size: 1.5em;">${y}年${m}月：收入 ${formatWanYuan(total)}</h3>
+        <div class="green">现金 ${formatWanYuan(cash)}，刷卡 ${formatWanYuan(card)}，外卖 ${formatWanYuan(takeout)}</div>
+        <div class="red">发票总额 ${formatWanYuan(invoice)}，占当月营业额 ${percent}%</div>
+        <div class="compare-block">
+          <h3>历年同月对比</h3>
+          <div id="yearlyCompare"></div>
+        </div>
+      `;
+
+      const container = document.getElementById('dailyDetails');
+      container.innerHTML = '';
+      dailyData.forEach(d => {
+        const div = document.createElement('div');
+        div.className = 'day-line';
+        const detail = document.createElement('div');
+        detail.className = 'day-detail';
+        detail.innerHTML = `<div class="green">现金 ${Math.round(d.cash)}欧元，刷卡 ${Math.round(d.card)}欧元，外卖 ${Math.round(d.takeout)}欧元</div>`;
+        if (d.total === 0 && d.iso < d.today) {
+          div.innerHTML = `<div>${d.row['日期']}：当日未营业</div>`;
+        } else {
+          div.innerHTML = `<div><a href="?day=${d.iso}">${d.row['日期']}</a>： <strong class="toggle">营业额${Math.round(d.total)}欧元</strong></div>`;
+          div.appendChild(detail);
+          div.querySelector(".toggle").addEventListener("click", () => {
+            detail.style.display = detail.style.display === "none" ? "block" : "none";
+          });
+        }
+        container.appendChild(div);
+      });
+
+      drawBarChart(dailyData.map(d => d.row['日期']), dailyData.map(d => Math.round(d.total)));
+
+      renderCompare(y, m);
+    }
+
+    function renderCompare(currentYear, month) {
+      const container = document.getElementById("yearlyCompare");
+      container.innerHTML = '';
+      const years = [...new Set(allData.map(r => getYM(r['日期'])[0]))].filter(y => y !== currentYear).sort();
+      years.forEach(y => {
+        let cash = 0, card = 0, takeout = 0;
+        allData.forEach(r => {
+          const [ry, rm] = getYM(r['日期']) || [];
+          if (ry === y && rm === month) {
+            const inc = calcIncome(r, true);
+            cash += inc.cash;
+            card += inc.card;
+            takeout += inc.takeout;
+          }
+        });
+        const total = cash + card + takeout;
+        if (total > 0) {
+          const line = document.createElement("div");
+          line.innerHTML = `<strong>${y}年</strong>：收入 ${formatWanYuan(total)}，<span class='green'>现金 ${formatWanYuan(cash)}，刷卡 ${formatWanYuan(card)}，外卖 ${formatWanYuan(takeout)}</span>`;
+          container.appendChild(line);
+        }
+      });
+    }
+
+    function drawBarChart(labels, values) {
+      const ctx = document.getElementById('barChart').getContext('2d');
+      if (window.myChart) window.myChart.destroy();
+      window.myChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [{ label: '日营业额', data: values }]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: false } },
+          scales: { y: { beginAtZero: true } }
+        }
+      });
+    }
+
+    function populateSelectors() {
+      const yearSel = document.getElementById("yearSelect");
+      const monthSel = document.getElementById("monthSelect");
+      const ymList = allData.map(r => getYM(r['日期'])).filter(x => x);
+      const years = [...new Set(ymList.map(x => x[0]))].sort();
+      const months = [...new Set(ymList.map(x => x[1]))].sort();
+
+      yearSel.innerHTML = '';
+      monthSel.innerHTML = '';
+      years.forEach(y => {
+        const opt = document.createElement("option");
+        opt.value = y;
+        opt.textContent = y;
+        yearSel.appendChild(opt);
+      });
+      months.forEach(m => {
+        const opt = document.createElement("option");
+        opt.value = m;
+        opt.textContent = m;
+        monthSel.appendChild(opt);
+      });
+
+      const lastRow = allData[allData.length - 1];
+      const [lastY, lastM] = getYM(lastRow['日期']) || [years[years.length - 1], months[months.length - 1]];
+
+      yearSel.value = lastY;
+      monthSel.value = lastM;
+      renderMonthView(lastY, lastM);
+
+      yearSel.onchange = () => renderMonthView(yearSel.value, monthSel.value);
+      monthSel.onchange = () => renderMonthView(yearSel.value, monthSel.value);
+    }
+
+    function loadFromGoogleSheet() {
+      const sheetURL = 'https://docs.google.com/spreadsheets/d/18XGIr9UZrhZk6-oe2TSoiQ4j8p_M-o-nEsUIgyTnefk/gviz/tq?tqx=out:csv';
+      Papa.parse(sheetURL, {
+        download: true,
+        header: true,
+        skipEmptyLines: true,
+        complete: function(res) {
+          allData = res.data;
+          populateSelectors();
+        }
+      });
+    }
+
+    window.addEventListener("DOMContentLoaded", loadFromGoogleSheet);
+  </script>
+</body>
+</html>

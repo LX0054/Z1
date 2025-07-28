@@ -1,0 +1,165 @@
+<!DOCTYPE html> 
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>个人账本</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.2/papaparse.min.js"></script>
+  <style>
+    body { font-family: sans-serif; padding: 20px; margin: 0; }
+    nav a { margin-right: 15px; text-decoration: none; font-weight: bold; }
+    .section { margin-top: 20px; }
+    canvas { max-width: 100%; height: auto; margin: 20px 0; }
+    .highlight { font-weight: bold; margin: 10px 0; text-align: center; }
+    .main-income {
+      font-size: 28px;
+      color: black;
+      border: 2px solid black;
+      padding: 10px;
+      margin: 15px auto;
+      display: inline-block;
+    }
+    .center { text-align: center; }
+    .small-text { font-size: 16px; }
+    .green { color: green; }
+    .red { color: darkred; }
+    .chart-title { text-align: center; font-size: 18px; font-weight: bold; margin-top: 30px; }
+    @media (max-width: 600px) {
+      .main-income { font-size: 22px; padding: 8px; }
+      .small-text { font-size: 14px; }
+      .chart-title { font-size: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="overview" class="section center"></div>
+
+  <script>
+    let data = [];
+
+    function parseEuro(str) {
+      if (!str) return 0;
+      return parseFloat(str.replace('€', '').replace(',', '').trim()) || 0;
+    }
+
+    function formatWanYuan(amount) {
+      const value = Math.round(amount);
+      const wan = Math.floor(value / 10000);
+      const qian = value % 10000;
+      return `${wan > 0 ? wan + '万' : ''}${qian}欧元`;
+    }
+
+    function animateAmount(targetEl, amount, label, className, large = false) {
+      let current = 0;
+      const step = amount / 40;
+      const interval = setInterval(() => {
+        current += step;
+        if (current >= amount) {
+          current = amount;
+          clearInterval(interval);
+        }
+        const formatted = formatWanYuan(current);
+        targetEl.textContent = `${label}${formatted}`;
+      }, 25);
+      targetEl.className = large ? `highlight main-income ${className} center` : `highlight small-text ${className}`;
+    }
+
+function loadFromGoogleSheet() {
+  const url = 'https://script.google.com/macros/s/AKfycbyPWyQtZkRWnWgoNHILed0MIhho1g1_VGRviLFV1cxU0i-TWhm0TnV4-oNfgHyHxA/exec';
+
+  fetch(url)
+    .then(res => res.json())
+    .then(results => {
+      data = results.map(row => ({
+        日期: row['日期'],
+        现金: parseEuro(row['现金']),
+        外卖现金: parseEuro(row['外卖现金']),
+        BBVA: parseEuro(row['BBVA']),
+        CAJA7: parseEuro(row['CAJA7']),
+        GLOVO: parseEuro(row['GLOVO']),
+        UBER: parseEuro(row['UBER']),
+        发票: parseEuro(row['买货发票'])
+      }));
+      renderOverview();
+    })
+    .catch(err => {
+      console.error("获取数据失败：", err);
+      document.getElementById('overview').innerHTML = `<p style="color:red;text-align:center;">⚠️ 需要登录 Google 账户才能查看数据</p>`;
+    });
+}
+    function renderOverview() {
+      if (!data.length) return;
+      const latestDate = data[data.length - 1].日期;
+
+      let sumCash = 0, sumCard = 0, sumTakeout = 0, sumInvoice = 0;
+      data.forEach(row => {
+        const cash = row.现金 - row.外卖现金;
+        const card = row.BBVA + row.CAJA7;
+        const takeout = (row.GLOVO + row.UBER) * 0.7;
+        const invoice = row.发票;
+
+        sumCash += cash;
+        sumCard += card;
+        sumTakeout += takeout;
+        sumInvoice += invoice;
+      });
+
+      const totalIncome = sumCash + sumCard + sumTakeout;
+      const invoiceRate = ((sumInvoice / totalIncome) * 100).toFixed(1);
+      
+      const overview = document.getElementById('overview');
+      overview.innerHTML = `
+        <h2 class="center">总览（截至 ${latestDate}）</h2>
+        <div id="totalIncome"></div>
+        <div id="cashIncome"></div>
+        <div id="cardIncome"></div>
+        <div id="takeoutIncome"></div>
+        <div id="invoiceTotal"></div>
+        <div id="invoiceRateText" class="small-text red"></div>
+        <div class="chart-title">收入构成比例</div>
+        <canvas id="incomeChart"></canvas>
+      `;
+
+      animateAmount(document.getElementById('totalIncome'), totalIncome, '总收入合计：', 'black', true);
+      animateAmount(document.getElementById('cashIncome'), sumCash, '现金：', 'green');
+      animateAmount(document.getElementById('cardIncome'), sumCard, '刷卡：', 'green');
+      animateAmount(document.getElementById('takeoutIncome'), sumTakeout, '外卖：', 'green');
+      animateAmount(document.getElementById('invoiceTotal'), sumInvoice, '发票总计：', 'red');
+
+      document.getElementById('invoiceRateText').textContent = `占总营业额的 ${invoiceRate}%`;
+
+      Chart.register(ChartDataLabels);
+
+      new Chart(document.getElementById('incomeChart'), {
+        type: 'pie',
+        data: {
+          labels: ['现金', '刷卡', '外卖'],
+          datasets: [{
+            data: [sumCash, sumCard, sumTakeout],
+            backgroundColor: ['#ffeb3b', '#2196f3', '#ff9800']
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            datalabels: {
+              formatter: (value, ctx) => {
+                let total = ctx.chart.data.datasets[0].data.reduce((a, b) => a + b, 0);
+                let percent = (value / total * 100).toFixed(1);
+                return `${percent}%\n${formatWanYuan(value)}`;
+              },
+              color: '#000',
+              font: { weight: 'bold', size: 14 },
+              textAlign: 'center'
+            }
+          }
+        }
+      });
+    }
+
+    window.addEventListener('DOMContentLoaded', loadFromGoogleSheet);
+  </script>
+</body>
+</html>

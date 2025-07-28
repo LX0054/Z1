@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>日览页面</title>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.2/papaparse.min.js"></script>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    .green { color: green; }
+    .red { color: red; }
+    .block { margin-bottom: 20px; }
+    input[type="date"] { font-size: 16px; padding: 5px; }
+  </style>
+</head>
+<body>
+  <label>选择日期：</label>
+  <input type="date" id="datePicker">
+
+  <div id="daySummary" class="block"></div>
+  <div id="dayCompare" class="block"></div>
+
+  <script>
+    let allData = [];
+
+    function parseEuro(v) {
+      return parseFloat((v || '').replace('€','').replace(',','').trim()) || 0;
+    }
+
+    function formatWanYuan(v) {
+      const n = Math.round(v);
+      const wan = Math.floor(n / 10000);
+      const qian = n % 10000;
+      return (wan > 0 ? wan + '万' : '') + qian + '欧元';
+    }
+
+    function toISO(dateStr) {
+      const m = dateStr.match(/(\d{4})[年\/-](\d{1,2})[月\/-](\d{1,2})/);
+      return m ? `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}` : '';
+    }
+
+    function showDayView(dateStr) {
+      const iso = dateStr;
+      const dayDiv = document.getElementById("daySummary");
+      const cmpDiv = document.getElementById("dayCompare");
+
+      const target = allData.find(r => toISO(r['日期']) === iso);
+      if (!target) {
+        dayDiv.innerHTML = `<h3>${iso}：无数据</h3>`;
+        cmpDiv.innerHTML = '';
+        return;
+      }
+
+      const income = calcIncome(target, true);
+      const invoice = parseEuro(target['买货发票']);
+      const total = income.cash + income.card + income.takeout;
+      const percent = total > 0 ? Math.round(invoice / total * 100) : 0;
+
+      dayDiv.innerHTML = `
+        <h3>${target['日期']}：营业额 ${Math.round(total)}欧元</h3>
+        <div class="green">现金 ${Math.round(income.cash)}欧元，刷卡 ${Math.round(income.card)}欧元，外卖 ${Math.round(income.takeout)}欧元</div>
+        <div class="red">发票 ${Math.round(invoice)}欧元，占营业额 ${percent}%</div>
+      `;
+
+      // 历年对比
+      const [y, m, d] = iso.split('-');
+      const others = allData.filter(r => {
+        const isoR = toISO(r['日期']);
+        return isoR.endsWith(`-${m}-${d}`) && isoR !== iso;
+      });
+
+      cmpDiv.innerHTML = '<h3>历年同日对比</h3>';
+      others.sort((a, b) => toISO(a['日期']).localeCompare(toISO(b['日期']))).forEach(r => {
+        const inc = calcIncome(r, true);
+        const ttl = inc.cash + inc.card + inc.takeout;
+        const line = document.createElement('div');
+        line.textContent = `${r['日期']}：收入 ${Math.round(ttl)}欧元，现金 ${Math.round(inc.cash)}，刷卡 ${Math.round(inc.card)}，外卖 ${Math.round(inc.takeout)}`;
+        cmpDiv.appendChild(line);
+      });
+    }
+
+    function calcIncome(row, includeTakeout = true) {
+      const year = row['日期'].slice(0, 4);
+      const cash = parseEuro(row['现金']) - parseEuro(row['外卖现金']);
+      const card = parseEuro(row['BBVA']) + parseEuro(row['CAJA7']);
+      let takeout = (parseEuro(row['GLOVO']) + parseEuro(row['UBER'])) * 0.7;
+      if ((year === '2022' || year === '2023') && !includeTakeout) takeout = 0;
+      return { cash, card, takeout };
+    }
+
+    function loadFromGoogleSheet() {
+      const sheetURL = 'https://docs.google.com/spreadsheets/d/18XGIr9UZrhZk6-oe2TSoiQ4j8p_M-o-nEsUIgyTnefk/gviz/tq?tqx=out:csv';
+      Papa.parse(sheetURL, {
+        download: true,
+        header: true,
+        skipEmptyLines: true,
+        complete: function(res) {
+          allData = res.data;
+
+          const latest = [...allData].reverse().find(r => toISO(r['日期']));
+          const defaultDate = new URLSearchParams(window.location.search).get("day") || toISO(latest['日期']);
+
+          document.getElementById("datePicker").value = defaultDate;
+          showDayView(defaultDate);
+        }
+      });
+    }
+
+    document.getElementById("datePicker").addEventListener("change", function(e) {
+      showDayView(e.target.value);
+    });
+
+    window.addEventListener("DOMContentLoaded", loadFromGoogleSheet);
+  </script>
+</body>
+</html>

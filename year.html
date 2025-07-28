@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>年览页面</title>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.2/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    .year-section { border: 1px solid #ccc; margin-bottom: 15px; padding: 10px; border-radius: 8px; transition: background 0.3s; }
+    .year-title { font-weight: bold; cursor: pointer; background: #f9f9f9; padding: 10px; border-radius: 5px; transition: background 0.3s; }
+    .year-title:hover { background-color: #e0f7fa; }
+    .month-detail { margin-left: 20px; margin-top: 5px; display: none; }
+    .text-sm { font-size: 14px; }
+    .green { color: green; margin-top: 4px; }
+    .red { color: red; margin-bottom: 4px; }
+    .bar-chart-container { max-width: 100%; margin-top: 30px; }
+    .month-link { color: #2196f3; cursor: pointer; text-decoration: underline; }
+    .month-link:hover { color: #0d47a1; }
+  </style>
+</head>
+<body>
+  <div id="yearView"></div>
+  <div class="bar-chart-container">
+    <canvas id="barChart"></canvas>
+  </div>
+
+  <script>
+    function parseEuro(value) {
+      if (!value) return 0;
+      return parseFloat(value.replace('€', '').replace(',', '').trim()) || 0;
+    }
+
+    function formatWanYuan(amount) {
+      const value = Math.round(amount);
+      const wan = Math.floor(value / 10000);
+      const qian = value % 10000;
+      return (wan > 0 ? `${wan}万` : '') + `${qian}欧元`;
+    }
+
+    function calcTotals(arr) {
+      let cash = 0, card = 0, takeout = 0, invoice = 0;
+      arr.forEach(r => {
+        cash += r.cash;
+        card += r.card;
+        takeout += r.takeout;
+        invoice += r.invoice;
+      });
+      return {
+        cash, card, takeout, invoice,
+        cashStr: formatWanYuan(cash),
+        cardStr: formatWanYuan(card),
+        takeoutStr: formatWanYuan(takeout),
+        invoiceStr: formatWanYuan(invoice),
+        total: cash + card + takeout,
+        totalStr: formatWanYuan(cash + card + takeout)
+      };
+    }
+
+    let barChart;
+
+    function drawBarChart(labels, values) {
+      const ctx = document.getElementById('barChart').getContext('2d');
+      if (barChart) barChart.destroy();
+      barChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: '年总收入（欧元）',
+            data: values,
+            backgroundColor: '#42a5f5'
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: function(ctx) {
+                  const v = Math.round(ctx.raw);
+                  const wan = Math.floor(v / 10000);
+                  const qian = v % 10000;
+                  return `${wan > 0 ? `${wan}万` : ''}${qian}欧元`;
+                }
+              }
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: true
+            }
+          }
+        }
+      });
+    }
+
+    function loadFromGoogleSheet() {
+      const sheetURL = 'https://docs.google.com/spreadsheets/d/18XGIr9UZrhZk6-oe2TSoiQ4j8p_M-o-nEsUIgyTnefk/gviz/tq?tqx=out:csv';
+      Papa.parse(sheetURL, {
+        download: true,
+        header: true,
+        skipEmptyLines: true,
+        complete: function(results) {
+          const raw = results.data;
+          const grouped = {};
+          raw.forEach(row => {
+            const date = row['日期'];
+            const year = date.slice(0, 4);
+            const monthMatch = date.match(/(\d+)月/);
+            const month = monthMatch ? monthMatch[1].padStart(2, '0') : date.slice(5, 7) || '01';
+            const key = `${year}-${month}`;
+
+            const record = {
+              cash: parseEuro(row['现金']) - parseEuro(row['外卖现金']),
+              card: parseEuro(row['BBVA']) + parseEuro(row['CAJA7']),
+              takeout: (parseEuro(row['GLOVO']) + parseEuro(row['UBER'])) * 0.7,
+              invoice: parseEuro(row['买货发票'])
+            };
+
+            if (!grouped[year]) grouped[year] = { total: [], months: {} };
+            grouped[year].total.push(record);
+
+            if (!grouped[year].months[key]) grouped[year].months[key] = [];
+            grouped[year].months[key].push(record);
+          });
+
+          renderYearView(grouped);
+        }
+      });
+    }
+
+    function renderYearView(grouped) {
+      const container = document.getElementById('yearView');
+      container.innerHTML = '';
+      const years = Object.keys(grouped).sort();
+      const barLabels = [], barValues = [];
+
+      years.forEach(year => {
+        const totals = calcTotals(grouped[year].total);
+        barLabels.push(year);
+        barValues.push(Math.round(totals.total));
+
+        const section = document.createElement('div');
+        section.className = 'year-section';
+
+        const title = document.createElement('div');
+        title.className = 'year-title';
+        title.innerHTML = `<strong>${year}年：</strong>总收入 ${totals.totalStr}`;
+
+        const incomeLine = document.createElement('div');
+        incomeLine.className = 'green';
+        incomeLine.textContent = `现金 ${totals.cashStr}，刷卡 ${totals.cardStr}，外卖 ${totals.takeoutStr}`;
+
+        const invoiceLine = document.createElement('div');
+        invoiceLine.className = 'red';
+        invoiceLine.textContent = `发票 ${totals.invoiceStr}`;
+
+        const monthDiv = document.createElement('div');
+        monthDiv.className = 'month-detail';
+
+        Object.entries(grouped[year].months).sort().forEach(([monthKey, records]) => {
+          const mTotals = calcTotals(records);
+          const line = document.createElement('div');
+          line.className = 'text-sm';
+
+          const [y, m] = monthKey.split('-');
+          const link = document.createElement('span');
+          link.className = 'month-link';
+          link.textContent = `${y}年${m}月`;
+          link.onclick = () => {
+            window.location.href = `month.html?month=${y}-${m}`;
+          };
+
+          line.appendChild(link);
+          line.innerHTML += `：现金 ${formatWanYuan(mTotals.cash)}，刷卡 ${formatWanYuan(mTotals.card)}，外卖 ${formatWanYuan(mTotals.takeout)}，发票 ${formatWanYuan(mTotals.invoice)}`;
+          monthDiv.appendChild(line);
+        });
+
+        title.addEventListener('click', () => {
+          monthDiv.style.display = monthDiv.style.display === 'none' ? 'block' : 'none';
+        });
+
+        section.appendChild(title);
+        section.appendChild(incomeLine);
+        section.appendChild(invoiceLine);
+        section.appendChild(monthDiv);
+        container.appendChild(section);
+      });
+
+      drawBarChart(barLabels, barValues);
+    }
+
+    window.addEventListener('DOMContentLoaded', loadFromGoogleSheet);
+  </script>
+</body>
+</html>
