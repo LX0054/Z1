@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>年度收入概览</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    h1 { text-align: center; }
+    .container { display: flex; flex-direction: column; align-items: center; }
+    .table-container { margin-top: 20px; width: 80%; overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 8px 12px; border: 1px solid #ddd; text-align: center; }
+    th { background-color: #f4f4f4; }
+    canvas { max-width: 900px; margin: 20px auto; }
+  </style>
+</head>
+<body>
+
+  <h1>年度收入概览</h1>
+  <div class="container">
+    <canvas id="lineChart"></canvas>
+    <div class="table-container">
+      <table id="monthlyTable">
+        <thead>
+          <tr>
+            <th>日期</th>
+            <th>现金</th>
+            <th>刷卡</th>
+            <th>外卖</th>
+            <th>总计</th>
+            <th>平均</th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- 月度数据将动态加载到这里 -->
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    const csvUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vS44fu207p7ozNnrKdTTWzKnovereIUNb1eCx8qMViyXU_yjqm7l3uhCSvsxOdCXkfq_IrlYAHEQv3_/pub?gid=113778029&single=true&output=csv';
+
+    async function fetchData() {
+      const response = await fetch(csvUrl);
+      const csvText = await response.text();
+      return Papa.parse(csvText, { header: true, skipEmptyLines: true }).data;
+    }
+
+    function processData(data) {
+      const monthlyData = [];
+      const yearlyData = {};
+
+      data.forEach(row => {
+        const date = row['日期'];
+        const year = date.substring(0, 4);
+        const month = parseInt(date.match(/(\d+)月/)[1]);
+
+        const total = parseFloat(row['总计'].replace(/[^\d.-]/g, ''));
+
+        monthlyData.push({ date, cash: row['现金'], card: row['刷卡'], delivery: row['外卖'], total, average: row['平均'] });
+
+        if (!yearlyData[year]) yearlyData[year] = Array(12).fill(0);
+        yearlyData[year][month - 1] += total;
+      });
+
+      return { monthlyData, yearlyData };
+    }
+
+    function renderLineChart(yearlyData) {
+      const labels = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'];
+      const datasets = Object.keys(yearlyData).map((year, index) => ({
+        label: year,
+        data: yearlyData[year],
+        borderColor: `hsl(${(index * 360) / Object.keys(yearlyData).length}, 70%, 50%)`,
+        backgroundColor: `hsla(${(index * 360) / Object.keys(yearlyData).length}, 70%, 50%, 0.2)`,
+        fill: true,
+        tension: 0.4
+      }));
+
+      new Chart(document.getElementById('lineChart'), {
+        type: 'line',
+        data: { labels, datasets },
+        options: {
+          responsive: true,
+          plugins: { legend: { position: 'top' } },
+          scales: {
+            y: { beginAtZero: true, title: { display: true, text: '收入 (€)' } }
+          }
+        }
+      });
+    }
+
+    function renderMonthlyTable(monthlyData) {
+      const tbody = document.querySelector('#monthlyTable tbody');
+      monthlyData.forEach(row => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${row.date}</td>
+          <td>${row.cash}</td>
+          <td>${row.card}</td>
+          <td>${row.delivery}</td>
+          <td>${row.total.toLocaleString()} €</td>
+          <td>${row.average}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    (async () => {
+      const data = await fetchData();
+      const { monthlyData, yearlyData } = processData(data);
+      renderLineChart(yearlyData);
+      renderMonthlyTable(monthlyData);
+    })();
+  </script>
+
+</body>
+</html>
