@@ -3,23 +3,69 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>年度收入概览</title>
+  <title>营业总额概览</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
   <style>
-    body { font-family: Arial, sans-serif; margin: 20px; }
-    h1 { text-align: center; }
-    .container { display: flex; flex-direction: column; align-items: center; }
-    .table-container { margin-top: 20px; width: 80%; overflow-x: auto; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { padding: 8px 12px; border: 1px solid #ddd; text-align: center; }
-    th { background-color: #f4f4f4; }
-    canvas { max-width: 900px; margin: 20px auto; }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      margin: 20px;
+      background: linear-gradient(to bottom, #fff5f5, #ffeaea);
+      color: #4a1f1f;
+    }
+    h1 {
+      text-align: center;
+      color: #b71c1c;
+      margin-bottom: 20px;
+      font-size: 2em;
+      text-shadow: 1px 1px 2px #ffa0a0;
+    }
+    .container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 30px;
+    }
+    .table-container {
+      width: 95%;
+      overflow-x: auto;
+      border-radius: 12px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+      background-color: #fff0f0;
+      padding: 15px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.95em;
+    }
+    th, td {
+      padding: 12px 18px;
+      border: 1px solid #f4c2c2;
+      text-align: center;
+    }
+    th {
+      background-color: #f16b6b;
+      color: #fff;
+      text-transform: uppercase;
+    }
+    tr:nth-child(even) {
+      background-color: #ffeaea;
+    }
+    canvas {
+      max-width: 900px;
+      width: 100%;
+      margin: 0 auto;
+      background-color: #fff0f0;
+      border-radius: 12px;
+      padding: 15px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+    }
   </style>
 </head>
 <body>
 
-  <h1>年度收入概览</h1>
+  <h1 id="title">营业总额</h1>
   <div class="container">
     <canvas id="lineChart"></canvas>
     <div class="table-container">
@@ -35,7 +81,7 @@
           </tr>
         </thead>
         <tbody>
-          <!-- 月度数据将动态加载到这里 -->
+          <!-- 月度数据动态加载 -->
         </tbody>
       </table>
     </div>
@@ -53,40 +99,62 @@
     function processData(data) {
       const monthlyData = [];
       const yearlyData = {};
+      let totalRevenue = 0;
 
       data.forEach(row => {
         const date = row['日期'];
         const year = date.substring(0, 4);
-        const month = parseInt(date.match(/(\d+)月/)[1]);
+        const monthMatch = date.match(/(\d+)月/);
+        if (!monthMatch) return;
+        const month = parseInt(monthMatch[1]);
 
-        const total = parseFloat(row['总计'].replace(/[^\d.-]/g, ''));
+        const total = parseFloat(row['总计'].replace(/[^\d.-]/g, '')) || 0;
+        totalRevenue += total;
 
         monthlyData.push({ date, cash: row['现金'], card: row['刷卡'], delivery: row['外卖'], total, average: row['平均'] });
 
-        if (!yearlyData[year]) yearlyData[year] = Array(12).fill(0);
-        yearlyData[year][month - 1] += total;
+        if (!yearlyData[year]) yearlyData[year] = {};
+        yearlyData[year][month] = total;
       });
 
-      return { monthlyData, yearlyData };
+      return { monthlyData, yearlyData, totalRevenue };
     }
 
     function renderLineChart(yearlyData) {
-      const labels = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'];
-      const datasets = Object.keys(yearlyData).map((year, index) => ({
-        label: year,
-        data: yearlyData[year],
-        borderColor: `hsl(${(index * 360) / Object.keys(yearlyData).length}, 70%, 50%)`,
-        backgroundColor: `hsla(${(index * 360) / Object.keys(yearlyData).length}, 70%, 50%, 0.2)`,
-        fill: true,
-        tension: 0.4
-      }));
+      const allMonths = Array.from(new Set(
+        Object.values(yearlyData).flatMap(y => Object.keys(y).map(m => parseInt(m)))
+      )).sort((a,b) => a - b);
+      const labels = allMonths.map(m => `${m}月`);
+
+      const datasets = Object.keys(yearlyData).map((year, index) => {
+        const data = allMonths.map(m => yearlyData[year][m] ?? null);
+        return {
+          label: year,
+          data: data,
+          borderColor: `hsl(${(index * 360) / Object.keys(yearlyData).length}, 70%, 50%)`,
+          backgroundColor: `hsla(${(index * 360) / Object.keys(yearlyData).length}, 70%, 50%, 0.2)`,
+          fill: true,
+          tension: 0.4,
+          pointRadius: 5,
+          pointHoverRadius: 7
+        };
+      });
 
       new Chart(document.getElementById('lineChart'), {
         type: 'line',
         data: { labels, datasets },
         options: {
           responsive: true,
-          plugins: { legend: { position: 'top' } },
+          plugins: {
+            legend: { position: 'top' },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  return context.dataset.label + ': ' + context.raw.toLocaleString() + ' €';
+                }
+              }
+            }
+          },
           scales: {
             y: { beginAtZero: true, title: { display: true, text: '收入 (€)' } }
           }
@@ -112,7 +180,13 @@
 
     (async () => {
       const data = await fetchData();
-      const { monthlyData, yearlyData } = processData(data);
+      const { monthlyData, yearlyData, totalRevenue } = processData(data);
+
+      // 更新标题
+      const million = Math.floor(totalRevenue / 10000);
+      const remainder = Math.round(totalRevenue % 10000);
+      document.getElementById('title').textContent = `营业总额为 ${million}万${remainder.toLocaleString()} 欧`;
+
       renderLineChart(yearlyData);
       renderMonthlyTable(monthlyData);
     })();
