@@ -1,57 +1,53 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>月度收入明细</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
-  <style>
-    body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      margin: 20px;
-      background: linear-gradient(to bottom, #fff5f5, #ffeaea);
-      color: #4a1f1f;
-    }
-    h1 {
-      text-align: center;
-      color: #b71c1c;
-      margin-bottom: 20px;
-      font-size: 2em;
-      text-shadow: 1px 1px 2px #ffa0a0;
-    }
-    .table-container {
-      width: 95%;
-      overflow-x: auto;
-      margin: 0 auto;
-      border-radius: 12px;
-      box-shadow: 0 6px 18px rgba(0,0,0,0.12);
-      background-color: #fff0f0;
-      padding: 15px;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.95em;
-    }
-    th, td {
-      padding: 12px 18px;
-      border: 1px solid #f4c2c2;
-      text-align: center;
-    }
-    th {
-      background-color: #f16b6b;
-      color: #fff;
-      text-transform: uppercase;
-    }
-    tr:nth-child(even) {
-      background-color: #ffeaea;
-    }
-    tr.total-row td {
-      font-weight: bold;
-      font-size: 1.1em;
-      background-color: #fcdcdc;
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>月度收入明细</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  margin: 20px;
+  background: linear-gradient(to bottom, #fff5f5, #ffeaea);
+  color: #4a1f1f;
+}
+h1 {
+  text-align: center;
+  color: #b71c1c;
+  margin-bottom: 20px;
+  font-size: 2em;
+  text-shadow: 1px 1px 2px #ffa0a0;
+}
+.table-container {
+  width: 95%;
+  overflow-x: auto;
+  margin: 0 auto 40px auto;
+  border-radius: 12px;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+  background-color: #fff0f0;
+  padding: 15px;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95em;
+}
+th, td {
+  padding: 12px 18px;
+  border: 1px solid #f4c2c2;
+  text-align: center;
+}
+th {
+  background-color: #f16b6b;
+  color: #fff;
+  text-transform: uppercase;
+}
+tr:nth-child(even) { background-color: #ffeaea; }
+tr.total-row td { font-weight: bold; font-size:1.1em; background-color: #fcdcdc; }
+canvas { max-width: 900px; width: 95%; margin: 20px auto; background-color: #fff0f0; border-radius: 12px; padding: 15px; box-shadow: 0 6px 18px rgba(0,0,0,0.12);}
+</style>
 </head>
 <body>
 
@@ -72,51 +68,49 @@
   </table>
 </div>
 
+<canvas id="monthChart"></canvas>
+<canvas id="compareChart"></canvas>
+
 <script>
-const csvUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vS44fu207p7ozNnrKdTTWzKnovereIUNb1eCx8qMViyXU_yjqm7l3uhCSvsxOdCXkfq_IrlYAHEQv3_/pub?gid=907541600&single=true&output=csv';
+const dailyCsvUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vS44fu207p7ozNnrKdTTWzKnovereIUNb1eCx8qMViyXU_yjqm7l3uhCSvsxOdCXkfq_IrlYAHEQv3_/pub?gid=907541600&single=true&output=csv';
+const monthlyCsvUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vS44fu207p7ozNnrKdTTWzKnovereIUNb1eCx8qMViyXU_yjqm7l3uhCSvsxOdCXkfq_IrlYAHEQv3_/pub?gid=113778029&single=true&output=csv';
 
-// 获取 URL 参数
 const urlParams = new URLSearchParams(window.location.search);
-const selectedMonth = urlParams.get('month'); // 格式：2025年9月
+const selectedMonth = urlParams.get('month'); // 例如 2025年9月
 
-async function fetchData() {
-  const response = await fetch(csvUrl);
-  const csvText = await response.text();
-  return Papa.parse(csvText, { header: true, skipEmptyLines: true }).data;
+async function fetchCsv(url) {
+  const response = await fetch(url);
+  const text = await response.text();
+  return Papa.parse(text, { header:true, skipEmptyLines:true }).data;
 }
 
 function renderTable(data) {
   const tbody = document.querySelector('#monthTable tbody');
-  tbody.innerHTML = '';
+  tbody.innerHTML='';
+  let totalSum=0, totalCash=0, totalCard=0, totalDelivery=0;
 
-  let totalSum = 0;
-  let totalCash = 0;
-  let totalCard = 0;
-  let totalDelivery = 0;
-
-  data.forEach(row => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
+  data.forEach(row=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`
       <td>${row['日期']}</td>
-      <td style="font-weight:bold; font-size:1.1em;">${row['总计']}</td>
+      <td style="font-weight:bold;font-size:1.1em;">${row['总计']}</td>
       <td>${row['现金']}</td>
       <td>${row['刷卡']}</td>
       <td>${row['外卖']}</td>
     `;
     tbody.appendChild(tr);
 
-    totalSum += parseFloat(row['总计'].replace(/[^\d.-]/g,'')) || 0;
-    totalCash += parseFloat(row['现金'].replace(/[^\d.-]/g,'')) || 0;
-    totalCard += parseFloat(row['刷卡'].replace(/[^\d.-]/g,'')) || 0;
-    totalDelivery += parseFloat(row['外卖'].replace(/[^\d.-]/g,'')) || 0;
+    totalSum += parseFloat(row['总计'].replace(/[^\d.-]/g,''))||0;
+    totalCash += parseFloat(row['现金'].replace(/[^\d.-]/g,''))||0;
+    totalCard += parseFloat(row['刷卡'].replace(/[^\d.-]/g,''))||0;
+    totalDelivery += parseFloat(row['外卖'].replace(/[^\d.-]/g,''))||0;
   });
 
-  // 添加总计行
   const trTotal = document.createElement('tr');
   trTotal.classList.add('total-row');
-  trTotal.innerHTML = `
+  trTotal.innerHTML=`
     <td>总计</td>
-    <td style="font-weight:bold; font-size:1.1em;">${totalSum.toLocaleString()} €</td>
+    <td style="font-weight:bold;font-size:1.1em;">${totalSum.toLocaleString()} €</td>
     <td>${totalCash.toLocaleString()} €</td>
     <td>${totalCard.toLocaleString()} €</td>
     <td>${totalDelivery.toLocaleString()} €</td>
@@ -124,14 +118,75 @@ function renderTable(data) {
   tbody.appendChild(trTotal);
 }
 
-(async () => {
-  const data = await fetchData();
-  // 过滤选中月份
-  const filteredData = data.filter(row => row['日期'].startsWith(selectedMonth));
-  document.getElementById('title').textContent = `${selectedMonth} 月度收入明细`;
-  renderTable(filteredData);
+function renderDailyChart(data) {
+  const labels = data.map(r=>r['日期']).reverse(); // 按日期升序
+  const totals = data.map(r=>parseFloat(r['总计'].replace(/[^\d.-]/g,''))||0).reverse();
+
+  new Chart(document.getElementById('monthChart'), {
+    type:'line',
+    data:{ labels, datasets:[{
+      label: selectedMonth+' 每日总计',
+      data: totals,
+      borderColor:'hsl(0,70%,50%)',
+      backgroundColor:'hsla(0,70%,50%,0.2)',
+      fill:true,
+      tension:0.3
+    }]},
+    options:{ responsive:true, plugins:{ legend:{position:'top'} }, scales:{ y:{beginAtZero:true,title:{display:true,text:'收入 (€)'}} } }
+  });
+}
+
+function renderCompareChart(monthlyData, monthNum) {
+  // monthlyData: 所有年份每月总计
+  const years = Object.keys(monthlyData).sort();
+  const values = years.map(y=>monthlyData[y][monthNum]||0);
+  const labels = years;
+
+  // 计算同比变化百分比
+  const pctChange = [];
+  for(let i=1;i<values.length;i++){
+    const change = values[i-1]? (values[i]-values[i-1])/values[i-1]*100 :0;
+    pctChange.push(change.toFixed(1));
+  }
+
+  new Chart(document.getElementById('compareChart'), {
+    type:'bar',
+    data:{
+      labels:labels,
+      datasets:[{
+        label:selectedMonth+' 历年总计',
+        data:values,
+        backgroundColor:values.map((v,i)=>i>0? (values[i]>values[i-1]?'green':'red'):'#888'),
+      }]
+    },
+    options:{ responsive:true, plugins:{ legend:{display:false} }, scales:{ y:{beginAtZero:true,title:{display:true,text:'收入 (€)'}} } }
+  });
+}
+
+(async()=>{
+  // 1. 渲染每日数据表
+  const dailyData = await fetchCsv(dailyCsvUrl);
+  const monthData = dailyData.filter(r=>r['日期'].startsWith(selectedMonth));
+  document.getElementById('title').textContent = selectedMonth+' 月度收入明细';
+  renderTable(monthData);
+  renderDailyChart(monthData);
+
+  // 2. 渲染历年同月对比
+  const monthlyDataRaw = await fetchCsv(monthlyCsvUrl);
+  const monthlyData = {};
+  monthlyDataRaw.forEach(row=>{
+    const year = row['日期'].substring(0,4);
+    const mMatch = row['日期'].match(/(\d+)月/);
+    if(!mMatch) return;
+    const m = parseInt(mMatch[1]);
+    if(!monthlyData[year]) monthlyData[year]={};
+    monthlyData[year][m] = parseFloat(row['总计'].replace(/[^\d.-]/g,''))||0;
+  });
+
+  const monthNumMatch = selectedMonth.match(/(\d+)月/);
+  const monthNum = monthNumMatch? parseInt(monthNumMatch[1]):1;
+  renderCompareChart(monthlyData, monthNum);
 })();
 </script>
-
 </body>
 </html>
