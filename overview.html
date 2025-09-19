@@ -52,6 +52,11 @@
     tr:nth-child(even) {
       background-color: #ffeaea;
     }
+    tr.total-row td {
+      font-weight: bold;
+      font-size: 1.1em;
+      background-color: #fcdcdc;
+    }
     canvas {
       max-width: 900px;
       width: 100%;
@@ -100,6 +105,7 @@
       const monthlyData = [];
       const yearlyData = {};
       let totalRevenue = 0;
+      let totalCash = 0, totalCard = 0, totalDelivery = 0;
 
       data.forEach(row => {
         const date = row['日期'];
@@ -109,7 +115,14 @@
         const month = parseInt(monthMatch[1]);
 
         const total = parseFloat(row['总计'].replace(/[^\d.-]/g, '')) || 0;
+        const cash = parseFloat(row['现金'].replace(/[^\d.-]/g, '')) || 0;
+        const card = parseFloat(row['刷卡'].replace(/[^\d.-]/g, '')) || 0;
+        const delivery = parseFloat(row['外卖'].replace(/[^\d.-]/g, '')) || 0;
+
         totalRevenue += total;
+        totalCash += cash;
+        totalCard += card;
+        totalDelivery += delivery;
 
         monthlyData.push({ date, cash: row['现金'], card: row['刷卡'], delivery: row['外卖'], total, average: row['平均'] });
 
@@ -117,7 +130,7 @@
         yearlyData[year][month] = total;
       });
 
-      return { monthlyData, yearlyData, totalRevenue };
+      return { monthlyData, yearlyData, totalRevenue, totals: { cash: totalCash, card: totalCard, delivery: totalDelivery } };
     }
 
     function renderLineChart(yearlyData) {
@@ -162,7 +175,7 @@
       });
     }
 
-    function renderMonthlyTable(monthlyData) {
+    function renderMonthlyTable(monthlyData, totals) {
       const tbody = document.querySelector('#monthlyTable tbody');
       monthlyData.forEach(row => {
         const tr = document.createElement('tr');
@@ -176,11 +189,24 @@
         `;
         tbody.appendChild(tr);
       });
+
+      // 添加总计行，第二列显示总计，加粗加大
+      const trTotal = document.createElement('tr');
+      trTotal.classList.add('total-row');
+      trTotal.innerHTML = `
+        <td>总计</td>
+        <td>${totals.cash.toLocaleString()} €</td>
+        <td>${totals.card.toLocaleString()} €</td>
+        <td>${totals.delivery.toLocaleString()} €</td>
+        <td>${(totals.cash + totals.card + totals.delivery).toLocaleString()} €</td>
+        <td>-</td>
+      `;
+      tbody.appendChild(trTotal);
     }
 
     (async () => {
       const data = await fetchData();
-      const { monthlyData, yearlyData, totalRevenue } = processData(data);
+      const { monthlyData, yearlyData, totalRevenue, totals } = processData(data);
 
       // 更新标题
       const million = Math.floor(totalRevenue / 10000);
@@ -188,7 +214,7 @@
       document.getElementById('title').textContent = `营业总额为 ${million}万${remainder.toLocaleString()} 欧`;
 
       renderLineChart(yearlyData);
-      renderMonthlyTable(monthlyData);
+      renderMonthlyTable(monthlyData, totals);
     })();
   </script>
 
